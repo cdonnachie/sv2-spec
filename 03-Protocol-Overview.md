@@ -148,10 +148,21 @@ After receiving a request to reconnect, the downstream node MUST run the handsha
 ## 3.4 Protocol Extensions
 
 Protocol extensions may be defined by using a non-0 `extension_type` field in the message header (not including the `channel_msg` bit).
-The value used MUST either be in the range `0x4000` - `0x7fff` (inclusive, i.e. have the second-to-most-significant-bit set) denoting an "experimental" extension and not be present in production equipment, or have been allocated for the purpose at [http://stratumprotocol.org](http://stratumprotocol.org).
-While extensions SHOULD have a specification written describing their full functionality, `extension_type` allocations MAY also be requested for vendor-specific proprietary extensions to be used in production hardware.
-This is done by sending an email with a brief description of the intended use case to the Bitcoin Protocol Development List and extensions@stratumprotocol.org.
-(Note that these contacts may change in the future, please check the latest version of this document prior to sending such a request.)
+An `extension_type` need only be unique among peers that can share a connection, and an Avian connection and a Bitcoin one never do.
+This fork of the specification therefore keeps Avian's own extension registry, which is `doc/sv2.md` in Avian Core (AvianNetwork/Avian); that document is normative and this section restates it.
+The registry inherits the two identifiers that must mean the same thing on every Stratum v2 connection, because negotiation itself runs over one of them:
+
+| `extension_type` | Extension | Allocated by |
+| --- | --- | --- |
+| `0x0000` | core protocol messages | Stratum v2 |
+| `0x0001` | [Extensions Negotiation](./extensions/0x0001-extensions-negotiation.md) | Stratum v2 |
+| `0x4001` | [Algorithm Selection and Time-Bounded Work](./extensions/0x4001-algorithm-selection-and-time-bounded-work.md) | Avian |
+| `0x4002` | [Block Found Notification](./extensions/0x4002-block-found-notification.md) | Avian |
+
+`0x4000` - `0x4fff` is Avian's allocated space. `0x5000` - `0x7fff` is what this registry offers a third party to prototype in before asking for an allocation, and such a value MUST NOT be present in production equipment.
+The upstream rule that `0x4000` - `0x7fff` is experimental does not apply on an Avian connection; it was the upstream maintainers' own reading, when these extensions were offered to their registry and declined as out of scope (stratum-mining/sv2-spec#250), that a fork for another chain keeps its own registry and restates or drops that rule.
+Upstream allocates upward from `0x0003`, so the low numbers are left clear and an upstream extension can be adopted here later without renumbering anything.
+An allocation in this registry is requested by a pull request against `doc/sv2.md` in Avian Core.
 
 ### 3.4.1 Extension Type Field Usage
 
@@ -195,6 +206,11 @@ This prevents the needlessly wasted bandwidth and potentially serious performanc
 
 See `ChannelEndpointChanged` message in Common Protocol Messages for details about how extensions interact with dynamic channel reconfiguration in proxies.
 
+Negotiation agrees an `extension_type` and carries no per-extension version and no list of supported message types, so two implementations built at different times can agree on an identifier and disagree about what is inside it.
+On an Avian connection, **a receiving endpoint MUST ignore a message whose `extension_type` it negotiated and whose `msg_type` it does not recognise.** Log it and read the next frame. It MUST NOT be treated as a protocol violation and the connection MUST NOT be closed.
+That licenses optional additions only: a message a peer must act on, such as one that changes which work is valid, needs its own `extension_type` rather than a new `msg_type`, because the `extension_type` is the only capability granularity negotiation offers.
+A proxy MUST forward what it does not recognise rather than discard it.
+
 ### 3.4.3 Stratum V2 TLV Encoding Model
 
 To ensure a consistent and extensible way of adding optional fields to existing messages, **Stratum V2 supports Type-Length-Value (TLV) encoding** for protocol extensions. This model allows for structured, backward-compatible extensions while ensuring that unknown fields can be safely ignored.
@@ -231,12 +247,12 @@ If extension **0x0002** (Worker-Specific Hashrate Tracking) is negotiated, clien
 ```
 Encoded as:
 ```
-00 02 01 00 0A 57 6F 72 6B 65 72 5F 30 30 31
+02 00 01 0A 00 57 6F 72 6B 65 72 5F 30 30 31
 ```
 
 Where:
-- `00 02 01` → TLV Type (Extension `0x0002`, Field `0x01` — `user_identity`)
-- `00 0A` → Length = 10 bytes
+- `02 00 01` → TLV Type (Extension `0x0002` little-endian, Field `0x01` — `user_identity`)
+- `0A 00` → Length = 10 bytes, little-endian like every multibyte integer in section 3.1
 - `57 6F 72 6B 65 72 5F 30 30 31` → `"Worker_001"` (UTF-8 encoded)
 
 A device processing `SubmitSharesExtended` **MUST scan for TLV fields** matching any negotiated extensions, allowing for future extensibility without breaking compatibility.
